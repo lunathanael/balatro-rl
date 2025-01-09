@@ -34,8 +34,7 @@ class PGAgent:
 
         self.model = self._build_model()
         
-        # Update TensorBoard setup
-        self.log_dir = "logs/pg_agent_" + time.strftime("%Y%m%d-%H%M%S")
+        self.log_dir = "logs/pg_agent_standard_" + time.strftime("%Y%m%d-%H%M%S")
         self.summary_writer = tf.summary.create_file_writer(self.log_dir)
         self.tensorboard = TensorBoard(log_dir=self.log_dir)
         self.tensorboard.set_model(self.model)
@@ -95,13 +94,13 @@ class PGAgent:
                 'discard_count': 'categorical_crossentropy',
                 'play_prob': 'binary_crossentropy',
             },
-            loss_weights={
-                'play_cards': 0.5,
-                'play_count': 0.15,
-                'discard_cards': 0.4,
-                'discard_count': 0.1,
-                'play_prob': 1.0,
-            }
+            # loss_weights={
+            #     'play_cards': 0.5,
+            #     'play_count': 0.15,
+            #     'discard_cards': 0.4,
+            #     'discard_count': 0.1,
+            #     'play_prob': 1.0,
+            # }
         )
         return model
 
@@ -256,9 +255,57 @@ class PGAgent:
     def save(self, name):
         self.model.save_weights(name)
 
+
+def generate_random_games(num_games):
+    game_trajectories = []
+    env = gym.make("Balatro-v0", render_mode="human")
+    for _ in range(num_games):
+        state = env.reset()
+        episode_reward = 0
+        trajectories = []
+        while True:
+            actual_hand = state[1]["state"].hand
+            played_cards = random.randint(1, 5)
+            selected_cards = random.sample(actual_hand.cards, played_cards)
+
+            playing_hand = np.zeros(52, dtype=np.bool)
+            for card in selected_cards:
+                playing_hand[bg.utils.card_to_index(card)] = 1
+
+            is_discard = random.choice([True, False])
+            if state[0]['discards'] == 0:
+                is_discard = False
+
+            action = (playing_hand, is_discard)
+
+            obs, reward, done, truncated, info = env.step(action)
+
+            probs = np.ones(52, dtype=np.float32) / np.sum(playing_hand)
+            probs[~playing_hand] = 0
+
+            action = {
+                'action_mask': playing_hand,
+                'is_discard': is_discard,
+                'probs': probs,
+                'num_cards': played_cards
+            }
+
+            trajectories.append((state, action, reward))
+            state = (obs, info)
+            episode_reward += reward
+            if done:
+                break
+        game_trajectories.append(trajectories)
+    return game_trajectories
+
 if __name__ == "__main__":
     env = gym.make("Balatro-v0", render_mode="human")
     agent = PGAgent()
+
+    game_trajectories = generate_random_games(0)
+    for trajectory in game_trajectories:
+        agent.remember(trajectory)
+    agent.train()
     
     # Add total actions counter
     total_actions = 0
@@ -310,4 +357,4 @@ if __name__ == "__main__":
         print(f"Episode {episode}: Reward = {episode_reward}, Actions = {episode_actions}, Reward/Action = {reward_per_action:.3f}")
         
         if episode % 10 == 0:
-            agent.save('save_model/balatro_agent.weights.h5')
+            agent.save('save_model/balatro_agent_standard.weights.h5')
