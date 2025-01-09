@@ -18,7 +18,7 @@ class PGAgent:
         self.hand_size = 8
         self.num_suits = 4
         self.num_ranks = 13
-        self.gamma = 0.99
+        self.gamma = 0.95
         self.learning_rate = 0.001
         
         # Memory buffers with fixed queue size
@@ -82,10 +82,10 @@ class PGAgent:
                 'play_prob': 'binary_crossentropy',
             },
             loss_weights={
-                'play_cards': 1.0,
-                'play_count': 1.0,
-                'discard_cards': 1.0,
-                'discard_count': 1.0,
+                'play_cards': 0.5,
+                'play_count': 0.15,
+                'discard_cards': 0.4,
+                'discard_count': 0.1,
                 'play_prob': 1.0,
             }
         )
@@ -207,6 +207,7 @@ class PGAgent:
                 play_cards[i][action['mask']] = action['probs'][action['mask']] * reward
                 play_count[i][action['num_cards']-1] = 1  # One-hot encode the count
                 play_prob[i] = 1
+
         # Train model
         self.model.train_on_batch(
             states,
@@ -234,7 +235,7 @@ if __name__ == "__main__":
     env = gym.make("Balatro-v0", render_mode="human")
     agent = PGAgent()
     
-    for episode in range(100_000):
+    for episode in range(1_000_000):
         state = env.reset()
         episode_reward = 0
         
