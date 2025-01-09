@@ -26,7 +26,7 @@ class PGAgent:
         self.learning_rate = 0.001
 
         self.num_epochs = 4
-        self.batch_size = 16
+        self.batch_size = 32
         
         # Memory buffers with fixed queue size
         self.queue_size = 10_000
@@ -129,35 +129,87 @@ class PGAgent:
         x = self.preprocess_state(state)
         play_cards, play_count, discard_cards, discard_count, play_prob = self.model.predict(x, verbose=0)
         
+        play_prob = np.squeeze(play_prob)
+        play_prob = np.clip(play_prob, 0, 1)
+
         if discards == 0:
             play_prob = 1
+        
+        action_type_probs = np.array([play_prob, 1-play_prob])
+        action_type_probs = action_type_probs / np.sum(action_type_probs)
+        action_type = np.random.choice([0, 1], p=action_type_probs)
 
-        # Choose action type based on highest probability
-        if play_prob >= 0.5:
-            num_cards = np.argmax(play_count[0]) + 1
-            probs = play_cards[0]
-            is_discard = False
-        else:
-            num_cards = np.argmax(discard_count[0]) + 1
-            probs = discard_cards[0]
-            is_discard = True
+        play_num_cards_probs = play_count[0]
+        discard_num_cards_probs = discard_count[0]
+
+        play_num_cards_probs = play_num_cards_probs / np.sum(play_num_cards_probs)
+        discard_num_cards_probs = discard_num_cards_probs / np.sum(discard_num_cards_probs)
+
+        play_num_cards = np.random.choice(len(play_count[0]), p=play_num_cards_probs) + 1
+        discard_num_cards = np.random.choice(len(discard_count[0]), p=discard_num_cards_probs) + 1
+        
+        play_probs = play_cards[0]
+        discard_probs = discard_cards[0]
 
         if mask is not None:
             # Check for negative probabilities
-            probs = np.maximum(probs, 0)
-            probs[~mask] = -1
-            
+            play_probs = np.maximum(play_probs, 0)
+            discard_probs = np.maximum(discard_probs, 0)
+            play_probs[~mask] = 0
+            discard_probs[~mask] = 0
 
-        selected_cards = np.argsort(probs)[-num_cards:]
+            if np.count_nonzero(play_probs) < play_num_cards:
+                play_num_cards = np.count_nonzero(play_probs)
+            if play_num_cards == 0:
+                valid_indices = np.where(mask)[0]
+                max_card = max(5, np.count_nonzero(mask))
+                play_num_cards = np.random.randint(1, max_card)
+                play_selected_cards = np.random.choice(valid_indices, size=play_num_cards, replace=False)
+            else:
+                play_probs = play_probs / np.sum(play_probs)
+                play_selected_cards = np.random.choice(
+                    len(play_probs), 
+                    size=play_num_cards, 
+                    replace=False, 
+                    p=play_probs
+                )
+
+            if np.count_nonzero(discard_probs) < discard_num_cards:
+                discard_num_cards = np.count_nonzero(discard_probs)
+            if discard_num_cards == 0:
+                valid_indices = np.where(mask)[0]
+                max_card = max(5, np.count_nonzero(mask))
+                discard_num_cards = np.random.randint(1, max_card)
+                discard_selected_cards = np.random.choice(valid_indices, size=discard_num_cards, replace=False)
+            else:
+                discard_probs = discard_probs / np.sum(discard_probs)
+                discard_selected_cards = np.random.choice(
+                    len(discard_probs), 
+                    size=discard_num_cards, 
+                    replace=False, 
+                    p=discard_probs
+                )
+
+        if action_type == 0:
+            selected_cards = play_selected_cards
+            is_discard = False
+        else:
+            selected_cards = discard_selected_cards
+            is_discard = True
+            
         action_mask = np.zeros(self.num_suits * self.num_ranks, dtype=bool)
         action_mask[selected_cards] = True
         
-        # Store action info for training
         return {
             'action_mask': action_mask,
+            'play_prob': play_prob,
             'is_discard': is_discard,
-            'probs': probs,
-            'num_cards': num_cards
+            'play_probs': play_probs,
+            'discard_probs': discard_probs,
+            'play_num_cards': play_num_cards,
+            'discard_num_cards': discard_num_cards,
+            'play_num_cards_probs': play_num_cards_probs,
+            'discard_num_cards_probs': discard_num_cards_probs
         }
 
     def remember(self, trajectories):
@@ -202,27 +254,43 @@ class PGAgent:
             actions = [self.buffer[i][1] for i in indices]
             rewards = [self.buffer[i][2] for i in indices]
             discounted_rewards = [self.buffer[i][3] for i in indices]
+            discounted_rewards = discounted_rewards / np.std(discounted_rewards - np.mean(discounted_rewards))
 
             states = [np.vstack([state[j] for state in states]) for j in range(3)]
             
             # Prepare targets
-            play_cards = np.zeros((self.batch_size, 4*13))
-            play_count = np.zeros((self.batch_size, 5))
-            discard_cards = np.zeros((self.batch_size, 4*13))
-            discard_count = np.zeros((self.batch_size, 5))
-            play_prob = np.zeros((self.batch_size, 1))
+            play_cards = np.zeros((self.batch_size, 4*13), dtype=np.float32)
+            play_count = np.zeros((self.batch_size, 5), dtype=np.float32)
+            discard_cards = np.zeros((self.batch_size, 4*13), dtype=np.float32)
+            discard_count = np.zeros((self.batch_size, 5), dtype=np.float32)
+            play_prob = np.zeros((self.batch_size, 1), dtype=np.float32)
 
             for i, (action, reward) in enumerate(zip(actions, discounted_rewards)):
                 if action['is_discard']:
-                    # Use original probabilities, scaled by reward
-                    discard_cards[i][action['action_mask']] = action['probs'][action['action_mask']] * reward
-                    discard_count[i][action['num_cards']-1] = 1  # One-hot encode the count
+                    discard_cards[i][action['action_mask']] = 1
+                    discard_count[i][action['discard_num_cards']-1] = 1  # One-hot encode the count
+                    play_cards[i] = action['play_probs']
+                    play_count[i] = action['play_num_cards_probs']
                     play_prob[i] = 0
                 else:
-                    # Use original probabilities, scaled by reward
-                    play_cards[i][action['action_mask']] = action['probs'][action['action_mask']] * reward
-                    play_count[i][action['num_cards']-1] = 1  # One-hot encode the count
+                    play_cards[i][action['action_mask']] = 1
+                    play_count[i][action['play_num_cards']-1] = 1  # One-hot encode the count
+                    discard_cards[i] = action['discard_probs']
+                    discard_count[i] = action['discard_num_cards_probs']
                     play_prob[i] = 1
+
+                play_cards[i] = (np.array(play_cards[i]).astype('float32') - action['play_probs']) * reward
+                discard_cards[i] = (np.array(discard_cards[i]).astype('float32') - action['discard_probs']) * reward
+                play_count[i] = (np.array(play_count[i]).astype('float32') - action['play_num_cards_probs']) * reward
+                discard_count[i] = (np.array(discard_count[i]).astype('float32') - action['discard_num_cards_probs']) * reward
+                play_prob[i] = (np.array(play_prob[i]).astype('float32') - action['play_prob']) * reward
+                
+                play_cards[i] = action['play_probs'] + self.learning_rate * play_cards[i]
+                discard_cards[i] = action['discard_probs'] + self.learning_rate * discard_cards[i]
+                play_count[i] = action['play_num_cards_probs'] + self.learning_rate * play_count[i]
+                discard_count[i] = action['discard_num_cards_probs'] + self.learning_rate * discard_count[i]
+                play_prob[i] = action['play_prob'] + self.learning_rate * play_prob[i]
+
 
             # Train model and get loss values
             logs = self.model.train_on_batch(
@@ -264,17 +332,42 @@ def generate_random_games(num_games):
         episode_reward = 0
         trajectories = []
         while True:
-            actual_hand = state[1]["state"].hand
-            played_cards = random.randint(1, 5)
-            selected_cards = random.sample(actual_hand.cards, played_cards)
+            actual_hand = list(state[1]["state"].hand.cards)
+            actual_hand = [card for card in actual_hand if card != bg.core.Cards.No_Card]
 
-            playing_hand = np.zeros(52, dtype=np.bool)
-            for card in selected_cards:
-                playing_hand[bg.utils.card_to_index(card)] = 1
+            mask = np.zeros(52, dtype=np.bool)
+            for card in actual_hand:
+                mask[bg.utils.card_to_index(card)] = 1
+            card_probs = np.ones(52, dtype=np.float32) / len(actual_hand)
+            card_probs[~mask] = 0
+
+            num_cards_in_hand = len(actual_hand)
+            num_cards_probs = np.ones(5, dtype=np.float32) / min(5, num_cards_in_hand)
+            num_cards_probs[min(5, num_cards_in_hand):] = 0
+
+            play_num_cards = np.random.choice(range(1,6), p=num_cards_probs)
+            discard_num_cards = np.random.choice(range(1,6), p=num_cards_probs)
 
             is_discard = random.choice([True, False])
+            play_prob = 0.5
             if state[0]['discards'] == 0:
                 is_discard = False
+                play_prob = 1
+
+            discard_selected_cards = random.sample(actual_hand, discard_num_cards)
+            play_selected_cards = random.sample(actual_hand, play_num_cards)
+    
+            play_playing_hand = np.zeros(52, dtype=np.bool)
+            for card in play_selected_cards:
+                play_playing_hand[bg.utils.card_to_index(card)] = 1
+            discard_playing_hand = np.zeros(52, dtype=np.bool)
+            for card in discard_selected_cards:
+                discard_playing_hand[bg.utils.card_to_index(card)] = 1
+
+            if is_discard:
+                playing_hand = discard_playing_hand
+            else:
+                playing_hand = play_playing_hand
 
             action = (playing_hand, is_discard)
 
@@ -286,8 +379,13 @@ def generate_random_games(num_games):
             action = {
                 'action_mask': playing_hand,
                 'is_discard': is_discard,
-                'probs': probs,
-                'num_cards': played_cards
+                'play_prob': play_prob,
+                'play_probs': card_probs,
+                'discard_probs': card_probs,
+                'play_num_cards': play_num_cards,
+                'discard_num_cards': discard_num_cards,
+                'play_num_cards_probs': num_cards_probs,
+                'discard_num_cards_probs': num_cards_probs
             }
 
             trajectories.append((state, action, reward))
@@ -302,7 +400,7 @@ if __name__ == "__main__":
     env = gym.make("Balatro-v0", render_mode="human")
     agent = PGAgent()
 
-    game_trajectories = generate_random_games(0)
+    game_trajectories = generate_random_games(1000)
     for trajectory in game_trajectories:
         agent.remember(trajectory)
     agent.train()
