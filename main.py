@@ -22,19 +22,19 @@ class PGAgent:
         self.hand_size = 8
         self.num_suits = 4
         self.num_ranks = 13
-        self.gamma = 0.95
+        self.gamma = 0.97
         self.learning_rate = 0.001
 
         self.num_epochs = 4
         self.batch_size = 32
         
         # Memory buffers with fixed queue size
-        self.queue_size = 10_000
+        self.queue_size = 5_000
         self.buffer = deque(maxlen=self.queue_size)
 
         self.model = self._build_model()
         
-        self.log_dir = "logs/pg_agent_standard_" + time.strftime("%Y%m%d-%H%M%S")
+        self.log_dir = "logs/pg_agent_97g_conv_" + time.strftime("%Y%m%d-%H%M%S")
         self.summary_writer = tf.summary.create_file_writer(self.log_dir)
         self.tensorboard = TensorBoard(log_dir=self.log_dir)
         self.tensorboard.set_model(self.model)
@@ -48,20 +48,44 @@ class PGAgent:
         deck = Input(shape=(self.num_suits, self.num_ranks, 1))    # 4x13x1 grid for deck
         game_state = Input(shape=(2,))                             # [num_hands, num_discards]
         
-        # Process hand with convolutions
-        hand_features = Conv2D(64, (2, 2), activation='relu', padding='same')(hand)
-        hand_features = Conv2D(64, (2, 2), activation='relu', padding='same')(hand_features)
+        # Process hand with convolutions - using both 2x2 and 1x3 kernels for different patterns
+        hand_features_2x2 = Conv2D(32, (2, 2), activation='relu', padding='same')(hand)
+        hand_features_2x2 = Conv2D(32, (2, 2), activation='relu', padding='same')(hand_features_2x2)
+        
+        # 1x3 kernel for detecting straights (horizontal patterns)
+        hand_features_1x3 = Conv2D(32, (1, 3), activation='relu', padding='same')(hand)
+        hand_features_1x3 = Conv2D(32, (1, 3), activation='relu', padding='same')(hand_features_1x3)
+        
+        # 4x1 kernel for detecting flushes (vertical patterns)
+        hand_features_4x1 = Conv2D(32, (4, 1), activation='relu', padding='same')(hand)
+        hand_features_4x1 = Conv2D(32, (4, 1), activation='relu', padding='same')(hand_features_4x1)
+        
+        # Combine all features
+        hand_features = Add()([hand_features_2x2, hand_features_1x3, hand_features_4x1])
         hand_features = Flatten()(hand_features)
         
-        # Process deck with convolutions
-        deck_features = Conv2D(64, (2, 2), activation='relu', padding='same')(deck)
-        deck_features = Conv2D(64, (2, 2), activation='relu', padding='same')(deck_features)
+        # Similar processing for deck
+        deck_features_2x2 = Conv2D(32, (2, 2), activation='relu', padding='same')(deck)
+        deck_features_2x2 = Conv2D(32, (2, 2), activation='relu', padding='same')(deck_features_2x2)
+        
+        deck_features_1x3 = Conv2D(32, (1, 3), activation='relu', padding='same')(deck)
+        deck_features_1x3 = Conv2D(32, (1, 3), activation='relu', padding='same')(deck_features_1x3)
+        
+        deck_features_4x1 = Conv2D(32, (4, 1), activation='relu', padding='same')(deck)
+        deck_features_4x1 = Conv2D(32, (4, 1), activation='relu', padding='same')(deck_features_4x1)
+        
+        deck_features = Add()([deck_features_2x2, deck_features_1x3, deck_features_4x1])
         deck_features = Flatten()(deck_features)
         
-        # Combine features
-        combined = Add()([
+        card_features = Add()([
             Dense(256)(hand_features),
-            Dense(256)(deck_features),
+            Dense(256)(deck_features)
+        ])
+        card_features = Dense(256, activation='relu')(card_features)
+        card_features = LayerNormalization()(card_features)
+        
+        combined = Add()([
+            card_features,
             Dense(256)(game_state)
         ])
         combined = Dense(256, activation='relu')(combined)
@@ -129,6 +153,12 @@ class PGAgent:
         x = self.preprocess_state(state)
         play_cards, play_count, discard_cards, discard_count, play_prob = self.model.predict(x, verbose=0)
         
+        original_play_cards = play_cards.copy()
+        original_play_count = play_count.copy()
+        original_discard_cards = discard_cards.copy()
+        original_discard_count = discard_count.copy()
+        original_play_prob = play_prob.copy()
+
         play_prob = np.squeeze(play_prob)
         play_prob = np.clip(play_prob, 0, 1)
 
@@ -202,14 +232,14 @@ class PGAgent:
         
         return {
             'action_mask': action_mask,
-            'play_prob': play_prob,
+            'play_prob': original_play_prob,
             'is_discard': is_discard,
-            'play_probs': play_probs,
-            'discard_probs': discard_probs,
+            'play_probs': original_play_cards,
+            'discard_probs': original_discard_cards,
             'play_num_cards': play_num_cards,
             'discard_num_cards': discard_num_cards,
-            'play_num_cards_probs': play_num_cards_probs,
-            'discard_num_cards_probs': discard_num_cards_probs
+            'play_num_cards_probs': original_play_count,
+            'discard_num_cards_probs': original_discard_count
         }
 
     def remember(self, trajectories):
@@ -400,7 +430,7 @@ if __name__ == "__main__":
     env = gym.make("Balatro-v0", render_mode="human")
     agent = PGAgent()
 
-    game_trajectories = generate_random_games(1000)
+    game_trajectories = generate_random_games(500)
     for trajectory in game_trajectories:
         agent.remember(trajectory)
     agent.train()
@@ -454,5 +484,5 @@ if __name__ == "__main__":
         
         print(f"Episode {episode}: Reward = {episode_reward}, Actions = {episode_actions}, Reward/Action = {reward_per_action:.3f}")
         
-        if episode % 10 == 0:
-            agent.save('save_model/balatro_agent_standard.weights.h5')
+        if episode % 1000 == 0:
+            agent.save('save_model/balatro_agent_97g_conv.weights.h5')
