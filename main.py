@@ -100,10 +100,10 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
 
 
 class Agent(nn.Module):
-    def __init__(self):
+    def __init__(self, obs_dim):
         super().__init__()
         self.network = nn.Sequential(
-            layer_init(nn.Linear(52 + 52 + 6, 128)),  # First layer expanded to handle 52 inputs
+            layer_init(nn.Linear(obs_dim, 128)),  # First layer expanded to handle 52 inputs
             nn.ReLU(),
             layer_init(nn.Linear(128, 256)),
             nn.ReLU(),
@@ -176,9 +176,9 @@ if __name__ == "__main__":
     envs = gym.vector.SyncVectorEnv(
         [make_env(args.env_id, i, args.capture_video, run_name) for i in range(args.num_envs)],
     )
-    # assert isinstance(envs.single_action_space, gym.spaces.Discrete), "only discrete action space is supported"
+    assert isinstance(envs.single_action_space, gym.spaces.Discrete), "only discrete action space is supported"
 
-    agent = Agent().to(device)
+    agent = Agent(np.array(envs.single_observation_space.shape).prod()).to(device)
     optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
 
     # ALGO Logic: Storage setup
