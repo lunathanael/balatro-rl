@@ -38,7 +38,7 @@ class Args:
     # Algorithm specific arguments
     env_id: str = "Balatro-v0"
     """the id of the environment"""
-    total_timesteps: int = 5_000_000
+    total_timesteps: int = 1_000_000
     """total timesteps of the experiments"""
     learning_rate: float = 2.5e-4
     """the learning rate of the optimizer"""
