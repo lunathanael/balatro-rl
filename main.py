@@ -42,7 +42,7 @@ class Args:
     """total timesteps of the experiments"""
     learning_rate: float = 2.5e-4
     """the learning rate of the optimizer"""
-    num_envs: int = 4
+    num_envs: int = 16
     """the number of parallel game environments"""
     num_steps: int = 128
     """the number of steps to run in each environment per policy rollout"""
@@ -102,35 +102,6 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
 class Agent(nn.Module):
     def __init__(self):
         super().__init__()
-        # self.critic = nn.Sequential(
-        #     layer_init(nn.Linear(np.array(envs.single_observation_space.shape).prod(), 64)),
-        #     nn.Tanh(),
-        #     layer_init(nn.Linear(64, 64)),
-        #     nn.Tanh(),
-        #     layer_init(nn.Linear(64, 1), std=1.0),
-        # )
-        # self.actor = nn.Sequential(
-        #     layer_init(nn.Linear(np.array(envs.single_observation_space.shape).prod(), 64)),
-        #     nn.Tanh(),
-        #     layer_init(nn.Linear(64, 64)),
-        #     nn.Tanh(),
-        #     layer_init(nn.Linear(64, 52), std=0.01),
-        # )
-
-        
-        # self.network = nn.Sequential(
-        #     nn.Unflatten(1, (1, 4, 13)),  # Reshape to (batch_size, 4, 13)
-        #     layer_init(nn.Conv2d(1, 32, kernel_size=(2, 3), stride=1, padding=1)),  # Capture suit-rank patterns
-        #     nn.ReLU(),
-        #     layer_init(nn.Conv2d(32, 64, kernel_size=(2, 3), stride=1)),
-        #     nn.ReLU(),
-        #     nn.Flatten(),
-        #     layer_init(nn.Linear(2816, 512)),  # Size depends on conv output
-        #     nn.ReLU(),
-        # )
-        # self.actor = layer_init(nn.Linear(512, 52), std=0.01)
-        # self.critic = layer_init(nn.Linear(512, 1), std=1)
-        
         self.network = nn.Sequential(
             layer_init(nn.Linear(52 + 52 + 6, 128)),  # First layer expanded to handle 52 inputs
             nn.ReLU(),
