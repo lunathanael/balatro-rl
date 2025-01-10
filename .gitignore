@@ -29,6 +29,7 @@ env/
 
 # Model checkpoints and saved weights
 save_model/
+models/
 *.h5
 *.weights
 *.pth
