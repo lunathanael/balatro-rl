@@ -121,12 +121,10 @@ class Agent(nn.Module):
 
     def get_action_and_value(self, x, action=None):
         logits = self.actor(self.network(x))
-        
         probs = torch.distributions.Categorical(logits=logits)
         # probs2 = torch.distributions.Categorical(logits=logits2)
         if action is None:
             action = probs.sample()
-        # return action, probs.log_prob(action[..., :-1]) + probs2.log_prob(action[..., -1]), probs.entropy() + probs2.entropy(), self.critic(self.network(x))
         return action, probs.log_prob(action), probs.entropy(), self.critic(self.network(x))
 
     def save(self, path):
