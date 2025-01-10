@@ -42,9 +42,9 @@ class Args:
     """total timesteps of the experiments"""
     learning_rate: float = 2.5e-4
     """the learning rate of the optimizer"""
-    num_envs: int = 8
+    num_envs: int = 4
     """the number of parallel game environments"""
-    num_steps: int = 512
+    num_steps: int = 128
     """the number of steps to run in each environment per policy rollout"""
     anneal_lr: bool = True
     """Toggle learning rate annealing for policy and value networks"""
@@ -132,7 +132,7 @@ class Agent(nn.Module):
         # self.critic = layer_init(nn.Linear(512, 1), std=1)
         
         self.network = nn.Sequential(
-            layer_init(nn.Linear(52, 128)),  # First layer expanded to handle 52 inputs
+            layer_init(nn.Linear(52 + 52 + 6, 128)),  # First layer expanded to handle 52 inputs
             nn.ReLU(),
             layer_init(nn.Linear(128, 256)),
             nn.ReLU(),
@@ -141,7 +141,7 @@ class Agent(nn.Module):
             layer_init(nn.Linear(512, 512)),
             nn.ReLU(),
         )
-        self.actor = layer_init(nn.Linear(512, 52), std=0.005)
+        self.actor = layer_init(nn.Linear(512, 53), std=0.005)
         # self.actor2 = layer_init(nn.Linear(512, 2), std=0.01) 
         self.critic = layer_init(nn.Linear(512, 1), std=1)
 
@@ -150,21 +150,16 @@ class Agent(nn.Module):
 
     def get_action_and_value(self, x, action=None):
         logits = self.actor(self.network(x))
-        # logits2 = self.actor2(self.network(x))
         
-        probs = torch.distributions.Multinomial(total_count=5, logits=logits)
+        probs = torch.distributions.Categorical(logits=logits)
         # probs2 = torch.distributions.Categorical(logits=logits2)
         if action is None:
-            indices = torch.multinomial(probs.probs, num_samples=5, replacement=False)
-            act52 = torch.zeros_like(probs.probs)
-            act52.scatter_(1, indices, 1)
-            # act2 = probs2.sample().unsqueeze(-1)
-            # action = torch.cat([act52, act2], dim=-1)
-            action = act52
+            action = probs.sample()
         # return action, probs.log_prob(action[..., :-1]) + probs2.log_prob(action[..., -1]), probs.entropy() + probs2.entropy(), self.critic(self.network(x))
         return action, probs.log_prob(action), probs.entropy(), self.critic(self.network(x))
 
     def save(self, path):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
         torch.save(self.state_dict(), path)
 
     @staticmethod
@@ -257,13 +252,12 @@ if __name__ == "__main__":
             rewards[step] = torch.tensor(reward).to(device).view(-1)
             next_obs, next_done = torch.Tensor(next_obs).to(device), torch.Tensor(next_done).to(device)
             if "final_info" in infos:
-                for r, l, punishment, _r in zip(infos["final_info"]["r"], infos["final_info"]["l"], infos["final_info"]["punishment"], infos["final_info"]["_r"]):
+                for r, l, _r in zip(infos["final_info"]["r"], infos["final_info"]["l"], infos["final_info"]["_r"]):
                     if not _r:
                         continue
                     # print(f"global_step={global_step}, episodic_return={r}")
                     writer.add_scalar("charts/episodic_return", r, global_step)
                     writer.add_scalar("charts/episodic_length", l, global_step)
-                    writer.add_scalar("charts/episodic_punishment", punishment, global_step)
         # bootstrap value if not done
         with torch.no_grad():
             next_value = agent.get_value(next_obs).reshape(1, -1)
