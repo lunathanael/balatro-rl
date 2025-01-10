@@ -34,7 +34,7 @@ class PGAgent:
 
         self.model = self._build_model()
         
-        self.log_dir = "logs/pg_agent_97g_conv_" + time.strftime("%Y%m%d-%H%M%S")
+        self.log_dir = "logs/pg_agent_97g_mse_weighted_" + time.strftime("%Y%m%d-%H%M%S")
         self.summary_writer = tf.summary.create_file_writer(self.log_dir)
         self.tensorboard = TensorBoard(log_dir=self.log_dir)
         self.tensorboard.set_model(self.model)
@@ -116,15 +116,15 @@ class PGAgent:
                 'play_count': 'categorical_crossentropy',
                 'discard_cards': 'binary_crossentropy',
                 'discard_count': 'categorical_crossentropy',
-                'play_prob': 'binary_crossentropy',
+                'play_prob': 'mse',
             },
-            # loss_weights={
-            #     'play_cards': 0.5,
-            #     'play_count': 0.15,
-            #     'discard_cards': 0.4,
-            #     'discard_count': 0.1,
-            #     'play_prob': 1.0,
-            # }
+            loss_weights={
+                'play_cards': 1.0,
+                'play_count': 0.05,
+                'discard_cards': 1.0,
+                'discard_count': 0.05,
+                'play_prob': 500.0,
+            }
         )
         return model
 
@@ -153,6 +153,9 @@ class PGAgent:
         x = self.preprocess_state(state)
         play_cards, play_count, discard_cards, discard_count, play_prob = self.model.predict(x, verbose=0)
         
+        if mask is None:
+            mask = np.ones(52, dtype=np.bool)
+
         original_play_cards = play_cards.copy()
         original_play_count = play_count.copy()
         original_discard_cards = discard_cards.copy()
@@ -181,44 +184,43 @@ class PGAgent:
         play_probs = play_cards[0]
         discard_probs = discard_cards[0]
 
-        if mask is not None:
-            # Check for negative probabilities
-            play_probs = np.maximum(play_probs, 0)
-            discard_probs = np.maximum(discard_probs, 0)
-            play_probs[~mask] = 0
-            discard_probs[~mask] = 0
+        # Check for negative probabilities
+        play_probs = np.maximum(play_probs, 0)
+        discard_probs = np.maximum(discard_probs, 0)
+        play_probs[~mask] = 0
+        discard_probs[~mask] = 0
 
-            if np.count_nonzero(play_probs) < play_num_cards:
-                play_num_cards = np.count_nonzero(play_probs)
-            if play_num_cards == 0:
-                valid_indices = np.where(mask)[0]
-                max_card = max(5, np.count_nonzero(mask))
-                play_num_cards = np.random.randint(1, max_card)
-                play_selected_cards = np.random.choice(valid_indices, size=play_num_cards, replace=False)
-            else:
-                play_probs = play_probs / np.sum(play_probs)
-                play_selected_cards = np.random.choice(
-                    len(play_probs), 
-                    size=play_num_cards, 
-                    replace=False, 
-                    p=play_probs
-                )
+        if np.count_nonzero(play_probs) < play_num_cards:
+            play_num_cards = np.count_nonzero(play_probs)
+        if play_num_cards == 0:
+            valid_indices = np.where(mask)[0]
+            max_card = max(5, np.count_nonzero(mask))
+            play_num_cards = np.random.randint(1, max_card)
+            play_selected_cards = np.random.choice(valid_indices, size=play_num_cards, replace=False)
+        else:
+            play_probs = play_probs / np.sum(play_probs)
+            play_selected_cards = np.random.choice(
+                len(play_probs), 
+                size=play_num_cards, 
+                replace=False, 
+                p=play_probs
+            )
 
-            if np.count_nonzero(discard_probs) < discard_num_cards:
-                discard_num_cards = np.count_nonzero(discard_probs)
-            if discard_num_cards == 0:
-                valid_indices = np.where(mask)[0]
-                max_card = max(5, np.count_nonzero(mask))
-                discard_num_cards = np.random.randint(1, max_card)
-                discard_selected_cards = np.random.choice(valid_indices, size=discard_num_cards, replace=False)
-            else:
-                discard_probs = discard_probs / np.sum(discard_probs)
-                discard_selected_cards = np.random.choice(
-                    len(discard_probs), 
-                    size=discard_num_cards, 
-                    replace=False, 
-                    p=discard_probs
-                )
+        if np.count_nonzero(discard_probs) < discard_num_cards:
+            discard_num_cards = np.count_nonzero(discard_probs)
+        if discard_num_cards == 0:
+            valid_indices = np.where(mask)[0]
+            max_card = max(5, np.count_nonzero(mask))
+            discard_num_cards = np.random.randint(1, max_card)
+            discard_selected_cards = np.random.choice(valid_indices, size=discard_num_cards, replace=False)
+        else:
+            discard_probs = discard_probs / np.sum(discard_probs)
+            discard_selected_cards = np.random.choice(
+                len(discard_probs), 
+                size=discard_num_cards, 
+                replace=False, 
+                p=discard_probs
+            )
 
         if action_type == 0:
             selected_cards = play_selected_cards
@@ -485,4 +487,4 @@ if __name__ == "__main__":
         print(f"Episode {episode}: Reward = {episode_reward}, Actions = {episode_actions}, Reward/Action = {reward_per_action:.3f}")
         
         if episode % 1000 == 0:
-            agent.save('save_model/balatro_agent_97g_conv.weights.h5')
+            agent.save('save_model/balatro_agent_97g_mse_weighted.weights.h5')
