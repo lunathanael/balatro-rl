@@ -38,13 +38,13 @@ class Args:
     # Algorithm specific arguments
     env_id: str = "Balatro-v0"
     """the id of the environment"""
-    total_timesteps: int = 500_000
+    total_timesteps: int = 5_000_000
     """total timesteps of the experiments"""
     learning_rate: float = 2.5e-4
     """the learning rate of the optimizer"""
-    num_envs: int = 4
+    num_envs: int = 8
     """the number of parallel game environments"""
-    num_steps: int = 128
+    num_steps: int = 512
     """the number of steps to run in each environment per policy rollout"""
     anneal_lr: bool = True
     """Toggle learning rate annealing for policy and value networks"""
@@ -100,32 +100,78 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
 
 
 class Agent(nn.Module):
-    def __init__(self, envs):
+    def __init__(self):
         super().__init__()
-        self.critic = nn.Sequential(
-            layer_init(nn.Linear(np.array(envs.single_observation_space.shape).prod(), 8)),
-            nn.Tanh(),
-            layer_init(nn.Linear(64, 64)),
-            nn.Tanh(),
-            layer_init(nn.Linear(64, 1), std=1.0),
+        # self.critic = nn.Sequential(
+        #     layer_init(nn.Linear(np.array(envs.single_observation_space.shape).prod(), 64)),
+        #     nn.Tanh(),
+        #     layer_init(nn.Linear(64, 64)),
+        #     nn.Tanh(),
+        #     layer_init(nn.Linear(64, 1), std=1.0),
+        # )
+        # self.actor = nn.Sequential(
+        #     layer_init(nn.Linear(np.array(envs.single_observation_space.shape).prod(), 64)),
+        #     nn.Tanh(),
+        #     layer_init(nn.Linear(64, 64)),
+        #     nn.Tanh(),
+        #     layer_init(nn.Linear(64, 52), std=0.01),
+        # )
+
+        
+        # self.network = nn.Sequential(
+        #     nn.Unflatten(1, (1, 4, 13)),  # Reshape to (batch_size, 4, 13)
+        #     layer_init(nn.Conv2d(1, 32, kernel_size=(2, 3), stride=1, padding=1)),  # Capture suit-rank patterns
+        #     nn.ReLU(),
+        #     layer_init(nn.Conv2d(32, 64, kernel_size=(2, 3), stride=1)),
+        #     nn.ReLU(),
+        #     nn.Flatten(),
+        #     layer_init(nn.Linear(2816, 512)),  # Size depends on conv output
+        #     nn.ReLU(),
+        # )
+        # self.actor = layer_init(nn.Linear(512, 52), std=0.01)
+        # self.critic = layer_init(nn.Linear(512, 1), std=1)
+        
+        self.network = nn.Sequential(
+            layer_init(nn.Linear(52, 128)),  # First layer expanded to handle 52 inputs
+            nn.ReLU(),
+            layer_init(nn.Linear(128, 256)),
+            nn.ReLU(),
+            layer_init(nn.Linear(256, 512)),
+            nn.ReLU(),
+            layer_init(nn.Linear(512, 512)),
+            nn.ReLU(),
         )
-        self.actor = nn.Sequential(
-            layer_init(nn.Linear(np.array(envs.single_observation_space.shape).prod(), 64)),
-            nn.Tanh(),
-            layer_init(nn.Linear(64, 64)),
-            nn.Tanh(),
-            layer_init(nn.Linear(64, envs.single_action_space.n), std=0.01),
-        )
+        self.actor = layer_init(nn.Linear(512, 52), std=0.005)
+        # self.actor2 = layer_init(nn.Linear(512, 2), std=0.01) 
+        self.critic = layer_init(nn.Linear(512, 1), std=1)
 
     def get_value(self, x):
-        return self.critic(x)
+        return self.critic(self.network(x))
 
     def get_action_and_value(self, x, action=None):
-        logits = self.actor(x)
-        probs = Categorical(logits=logits)
+        logits = self.actor(self.network(x))
+        # logits2 = self.actor2(self.network(x))
+        
+        probs = torch.distributions.Multinomial(total_count=5, logits=logits)
+        # probs2 = torch.distributions.Categorical(logits=logits2)
         if action is None:
-            action = probs.sample()
-        return action, probs.log_prob(action), probs.entropy(), self.critic(x)
+            indices = torch.multinomial(probs.probs, num_samples=5, replacement=False)
+            act52 = torch.zeros_like(probs.probs)
+            act52.scatter_(1, indices, 1)
+            # act2 = probs2.sample().unsqueeze(-1)
+            # action = torch.cat([act52, act2], dim=-1)
+            action = act52
+        # return action, probs.log_prob(action[..., :-1]) + probs2.log_prob(action[..., -1]), probs.entropy() + probs2.entropy(), self.critic(self.network(x))
+        return action, probs.log_prob(action), probs.entropy(), self.critic(self.network(x))
+
+    def save(self, path):
+        torch.save(self.state_dict(), path)
+
+    @staticmethod
+    def load(path):
+        agent = Agent()
+        agent.load_state_dict(torch.load(path))
+        return agent
 
 
 if __name__ == "__main__":
@@ -164,9 +210,9 @@ if __name__ == "__main__":
     envs = gym.vector.SyncVectorEnv(
         [make_env(args.env_id, i, args.capture_video, run_name) for i in range(args.num_envs)],
     )
-    assert isinstance(envs.single_action_space, gym.spaces.Discrete), "only discrete action space is supported"
+    # assert isinstance(envs.single_action_space, gym.spaces.Discrete), "only discrete action space is supported"
 
-    agent = Agent(envs).to(device)
+    agent = Agent().to(device)
     optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
 
     # ALGO Logic: Storage setup
@@ -180,9 +226,11 @@ if __name__ == "__main__":
     # TRY NOT TO MODIFY: start the game
     global_step = 0
     start_time = time.time()
-    next_obs, _ = envs.reset(seed=args.seed)
+    next_obs, infos = envs.reset(seed=args.seed)
     next_obs = torch.Tensor(next_obs).to(device)
     next_done = torch.zeros(args.num_envs).to(device)
+
+    save_iteration = 0
 
     for iteration in range(1, args.num_iterations + 1):
         # Annealing the rate if instructed to do so.
@@ -209,10 +257,13 @@ if __name__ == "__main__":
             rewards[step] = torch.tensor(reward).to(device).view(-1)
             next_obs, next_done = torch.Tensor(next_obs).to(device), torch.Tensor(next_done).to(device)
             if "final_info" in infos:
-                for r, l in zip(infos["final_info"]["r"], infos["final_info"]["l"]):
-                    print(f"global_step={global_step}, episodic_return={r}")
+                for r, l, punishment, _r in zip(infos["final_info"]["r"], infos["final_info"]["l"], infos["final_info"]["punishment"], infos["final_info"]["_r"]):
+                    if not _r:
+                        continue
+                    # print(f"global_step={global_step}, episodic_return={r}")
                     writer.add_scalar("charts/episodic_return", r, global_step)
                     writer.add_scalar("charts/episodic_length", l, global_step)
+                    writer.add_scalar("charts/episodic_punishment", punishment, global_step)
         # bootstrap value if not done
         with torch.no_grad():
             next_value = agent.get_value(next_obs).reshape(1, -1)
@@ -295,6 +346,10 @@ if __name__ == "__main__":
         var_y = np.var(y_true)
         explained_var = np.nan if var_y == 0 else 1 - np.var(y_true - y_pred) / var_y
 
+        save_iteration += 1
+        if save_iteration % 20 == 0:
+            agent.save(f"models/{run_name}_{global_step}.pth")
+
         # TRY NOT TO MODIFY: record rewards for plotting purposes
         writer.add_scalar("charts/learning_rate", optimizer.param_groups[0]["lr"], global_step)
         writer.add_scalar("losses/value_loss", v_loss.item(), global_step)
@@ -309,3 +364,4 @@ if __name__ == "__main__":
 
     envs.close()
     writer.close()
+    agent.save(f"models/{run_name}_{global_step}.pth")
