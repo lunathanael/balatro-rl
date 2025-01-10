@@ -1,6 +1,6 @@
 absl-py==2.1.0
 astunparse==1.6.3
-balatro-gym @ git+https://github.com/lunathanael/balatro-gym.git@bd27128415e1b252fb12676fadce82c6974cda4b
+balatro-gym @ git+https://github.com/lunathanael/balatro-gym.git@7386a791ef61e9150ba3d793e891cdf9472398dd
 certifi==2024.12.14
 charset-normalizer==3.4.1
 cloudpickle==3.1.0
@@ -32,7 +32,7 @@ mpmath==1.3.0
 namex==0.0.8
 nanobind==2.4.0
 networkx==3.4.2
-numpy==1.26.4
+numpy==2.2.1
 nvidia-cublas-cu12==12.4.5.8
 nvidia-cuda-cupti-cu12==12.4.127
 nvidia-cuda-nvrtc-cu12==12.4.127
