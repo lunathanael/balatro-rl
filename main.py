@@ -312,7 +312,7 @@ if __name__ == "__main__":
 
         save_iteration += 1
         if save_iteration % 20 == 0:
-            agent.save(f"models/{run_name}_{global_step}.pth")
+            agent.save(f"models/{run_name}.pth")
 
         # TRY NOT TO MODIFY: record rewards for plotting purposes
         writer.add_scalar("charts/learning_rate", optimizer.param_groups[0]["lr"], global_step)
