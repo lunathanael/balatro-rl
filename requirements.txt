@@ -1,6 +1,6 @@
 absl-py==2.1.0
 astunparse==1.6.3
-balatro-gym @ git+https://github.com/lunathanael/balatro-gym.git@4b903826f8e0acc4730d3bf7be119b965b7aedb6
+balatro-gym @ git+https://github.com/lunathanael/balatro-gym.git@4beab9edf2d1f9066c7d1ecaeebcff3d147c7ce2
 certifi==2024.12.14
 charset-normalizer==3.4.1
 cloudpickle==3.1.0
