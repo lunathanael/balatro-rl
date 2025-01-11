@@ -100,7 +100,7 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
 
 
 class Agent(nn.Module):
-    def __init__(self, obs_dim):
+    def __init__(self, obs_dim, action_dim):
         super().__init__()
         self.network = nn.Sequential(
             layer_init(nn.Linear(obs_dim, 128)),  # First layer expanded to handle 52 inputs
@@ -112,7 +112,7 @@ class Agent(nn.Module):
             layer_init(nn.Linear(512, 512)),
             nn.ReLU(),
         )
-        self.actor = layer_init(nn.Linear(512, 53), std=0.005)
+        self.actor = layer_init(nn.Linear(512, action_dim), std=0.005)
         # self.actor2 = layer_init(nn.Linear(512, 2), std=0.01) 
         self.critic = layer_init(nn.Linear(512, 1), std=1)
 
@@ -176,7 +176,7 @@ if __name__ == "__main__":
     )
     assert isinstance(envs.single_action_space, gym.spaces.Discrete), "only discrete action space is supported"
 
-    agent = Agent(np.array(envs.single_observation_space.shape).prod()).to(device)
+    agent = Agent(np.array(envs.single_observation_space.shape).prod(), envs.single_action_space.n).to(device)
     optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
 
     # ALGO Logic: Storage setup
