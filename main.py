@@ -44,7 +44,7 @@ class Args:
     """the learning rate of the optimizer"""
     num_envs: int = 16
     """the number of parallel game environments"""
-    num_steps: int = 128
+    num_steps: int = 256
     """the number of steps to run in each environment per policy rollout"""
     anneal_lr: bool = True
     """Toggle learning rate annealing for policy and value networks"""
@@ -132,8 +132,8 @@ class Agent(nn.Module):
         torch.save(self.state_dict(), path)
 
     @staticmethod
-    def load(path):
-        agent = Agent()
+    def load(path, obs_dim, action_dim):
+        agent = Agent(obs_dim, action_dim)
         agent.load_state_dict(torch.load(path))
         return agent
 
@@ -323,7 +323,7 @@ if __name__ == "__main__":
         writer.add_scalar("losses/approx_kl", approx_kl.item(), global_step)
         writer.add_scalar("losses/clipfrac", np.mean(clipfracs), global_step)
         writer.add_scalar("losses/explained_variance", explained_var, global_step)
-        print("SPS:", int(global_step / (time.time() - start_time)))
+        # print("SPS:", int(global_step / (time.time() - start_time)))
         writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
 
     envs.close()
