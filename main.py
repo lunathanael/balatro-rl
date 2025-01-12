@@ -120,12 +120,13 @@ class Agent(nn.Module):
         return self.critic(self.network(x))
 
     def get_action_and_value(self, x, action=None):
-        logits = self.actor(self.network(x))
+        x = self.network(x)
+        logits = self.actor(x)
         probs = torch.distributions.Categorical(logits=logits)
         # probs2 = torch.distributions.Categorical(logits=logits2)
         if action is None:
             action = probs.sample()
-        return action, probs.log_prob(action), probs.entropy(), self.critic(self.network(x))
+        return action, probs.log_prob(action), probs.entropy(), self.critic(x)
 
     def save(self, path):
         os.makedirs(os.path.dirname(path), exist_ok=True)
