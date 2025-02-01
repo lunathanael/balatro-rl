@@ -114,10 +114,10 @@ class Agent(nn.Module):
         )
         self.actor = layer_init(nn.Linear(512, action_dim), std=0.005)
         # self.actor2 = layer_init(nn.Linear(512, 2), std=0.01) 
-        self.critic = layer_init(nn.Linear(512, 1), std=1)
+        self.critic = layer_init(nn.Linear(512 + action_dim, 1), std=1)
 
     def get_value(self, x):
-        return self.critic(self.network(x))
+        return self.get_action_and_value(x, None)[3]
 
     def get_action_and_value(self, x, action=None):
         x = self.network(x)
@@ -126,6 +126,10 @@ class Agent(nn.Module):
         # probs2 = torch.distributions.Categorical(logits=logits2)
         if action is None:
             action = probs.sample()
+
+        action_encoded = torch.zeros_like(logits)
+        action_encoded[torch.arange(len(action)), action] = 1
+        x = torch.cat([x, action_encoded], dim=-1)
         return action, probs.log_prob(action), probs.entropy(), self.critic(x)
 
     def save(self, path):
